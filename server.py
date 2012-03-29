@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import zmq, json, time, random, socket, struct
 
 context = zmq.Context()
