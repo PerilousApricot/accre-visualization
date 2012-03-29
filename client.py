@@ -63,6 +63,7 @@ scene = { 'nodes' : [ ], 'blips' : [ ] }
 storageElements = { }
 storageDepots   = { }
 clusterNodes    = { }
+globalNodes     = { }
 allNodes        = { }
 
 def addToColumn( id, column, xpos ):
@@ -82,7 +83,7 @@ def addToColumn( id, column, xpos ):
         index += 1
         
 def addNodeIfNeeded( id ):
-    global storageElements, storageDepots, clusterNodes, allNodes
+    global storageElements, storageDepots, clusterNodes, allNodes, globalNodes
     if id in allNodes:
         return
     # fixme for real life
@@ -90,8 +91,10 @@ def addNodeIfNeeded( id ):
         addToColumn( id, storageElements, 1 )
     elif id < 25:
         addToColumn( id, storageDepots, 0 )
-    else:
+    elif id < 1000:
         addToColumn( id, clusterNodes, -1 )
+    else:
+        addToColumn( id, globalNodes, 1.75 )
             
     
 # The main drawing function. 
@@ -155,9 +158,7 @@ def doIdle():
     updateDisplay = False   
     try:
         while True: #read everything! Bomb with done.
-            data = zsock.recv( zmq.NOBLOCK )
-            data = data[len('bfsdump '):]
-            trans = json.loads( data )
+            trans = zsock.recv_json( zmq.NOBLOCK )
             processTransferInfo( trans )
             updateDisplay = True
     except zmq.ZMQError, e:
@@ -191,7 +192,7 @@ def doIdle():
     glutPostRedisplay()
 
 def processTransferInfo( transInfo ):
-    if transInfo['type'] == 'bfsSend':
+    if transInfo['type'] in ['bfsSend', 'gridftpDone']:
         addNodeIfNeeded( transInfo['from'] )
         addNodeIfNeeded( transInfo['to'] )
         displayTransferBlip( transInfo['from'], transInfo['to'], transInfo['size'] )
@@ -266,6 +267,6 @@ if __name__ == '__main__':
     context = zmq.Context()
     zsock   = context.socket(zmq.SUB)
     zsock.connect("tcp://0.0.0.0:9898")
-    zsock.setsockopt(zmq.SUBSCRIBE, "bfsdump")
+    zsock.setsockopt(zmq.SUBSCRIBE, "")
     glutMainLoop()
         
