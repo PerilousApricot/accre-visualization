@@ -18,6 +18,11 @@ import sys
 import zmq
 import math
 import json
+import time
+import socket
+import struct
+import NodeBox
+import TextBox
 OpenGL.FULL_LOGGING = True
 
 # Some api in the chain is translating the keystrokes to this octal string
@@ -56,15 +61,44 @@ def ReSizeGLScene(Width, Height):
     glViewport(0, 0, Width, Height)        # Reset The Current Viewport And Perspective Transformation
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
-    gluPerspective(45.0, 16.0/9.0, 0.1, 100.0)
+    gluPerspective(45.0, float(Width)/float(Height), 0.1, 100.0)
     glMatrixMode(GL_MODELVIEW)
 
-scene = { 'nodes' : [ ], 'blips' : [ ] }
-storageElements = { }
-storageDepots   = { }
-clusterNodes    = { }
-globalNodes     = { }
+scene = { 'nodes' : [ ], 'blips' : [ ], 'nodeBoxes' : [ ] }
+seBox = NodeBox.NodeBox( (.2,-.6,-1), .23, 1.6, "StorageElements", (0.87,0.5,0.0), isRotated = True)
+depotBox   = NodeBox.NodeBox( (-.3,-0.6,-1), .1, 1.6, "Depots", (0.87,0.5,0.0), isRotated = True)
+clusterBox      = NodeBox.NodeBox( (-1.9,-0.1,-1), 1, 1, "VAMPIRE", (0.87,0.5,0.0))
+globalBox     = NodeBox.NodeBox( (1,0,-1), 0.9, 0.9, "External", (0.87,0.5,0.0))
+externalSpeedBox5 = NodeBox.NodeBox( (1, -0.9, -1), 0.9, 0.6, "GridFTP Transfers", (1,0,0) )
+externalSpeedBox60 = NodeBox.NodeBox( (1, -0.9, -1), 0.9, 0.6, "GridFTP Transfers", (1,0,0) )
+externalSpeedBox60.setInvisible()
+scene['nodeBoxes'] = [seBox, depotBox, clusterBox, globalBox, externalSpeedBox5, externalSpeedBox60]
+
+inLabel5 = TextBox.TextBox( pos = (0, 0.5, .01), color = (1,1,0), text = "Inbound (/5min)")
+inSpeed5 = TextBox.TextBox( pos = (0, 0.4, .01), color = (1,1,0), text = "  100 MB/sec") 
+outLabel5 = TextBox.TextBox( pos = (0, 0.3, .01), color = (1,1,0), text = "Outbound (/5min)")
+outSpeed5 = TextBox.TextBox( pos = (0, 0.2, .01), color = (1,1,0), text = "  100 MB/sec")
+
+externalSpeedBox5.addChild( inLabel5, inSpeed5, outLabel5, outSpeed5)
+
+inLabel60 = TextBox.TextBox( pos = (0, 0.5, .01), color = (1,1,0), text = "Inbound (/1hr)")
+inSpeed60 = TextBox.TextBox( pos = (0, 0.4, .01), color = (1,1,0), text = "  100 MB/sec") 
+outLabel60 = TextBox.TextBox( pos = (0, 0.3, .01), color = (1,1,0), text = "Outbound (/1hr)")
+outSpeed60 = TextBox.TextBox( pos = (0, 0.2, .01), color = (1,1,0), text = "  100 MB/sec")
+
+externalSpeedBox60.addChild( inLabel60, inSpeed60, outLabel60, outSpeed60)
+
 allNodes        = { }
+
+inboundGridftp  = []
+outboundGridftp = []
+
+def WriteText( text ):
+    glPushMatrix()
+    glScalef(0.001,0.001,0.001)
+    for char in text:
+        glutStrokeCharacter(GLUT_STROKE_MONO_ROMAN, ord(char))
+    glPopMatrix()
 
 def addToColumn( id, column, xpos ):
     global scene, allNodes
@@ -81,32 +115,96 @@ def addToColumn( id, column, xpos ):
         column[k]['size'] = boxSize * 0.2
         column[k]['pos'][1] = -1 + (index * boxSize)
         index += 1
-        
+seLookup = {'10.0.1.112' : 'se3.vampire', 
+            '10.0.1.113' : 'se4.vampire',
+            '10.0.1.114' : 'se5.vampire',
+            '10.0.1.115' : 'se6.vampire',
+            '10.0.1.116' : 'se7.vampire',
+            '10.0.1.117' : 'se8.vampire',
+            '10.0.1.118' : 'se9.vampire',
+            '10.0.1.119' : 'se10.vampire',}
+internalLookup = {}
+internalLookup.update( seLookup )
+
+seIds = []
 def addNodeIfNeeded( id ):
-    global storageElements, storageDepots, clusterNodes, allNodes, globalNodes
+    global allNodes, seBox, depotBox, clusterBox, otherBox, internalLookup, seIds
+    global inLabel, outLabel
     if id in allNodes:
         return
+    node = { 'pos' : [0, 0.0,-0.99 ], 'color' : (0.2 ,1.0, 0.0), 'size' : 0.03, 'id' : id }
+    ipAddress = socket.inet_ntoa(struct.pack('!L',id))
+    try:
+        hostname  = socket.gethostbyaddr(ipAddress)[0]
+    except:
+        if ipAddress.startswith('10.'):
+            if ipAddress in internalLookup:
+                hostname = internalLookup[ipAddress]
+            else:
+                hostname = "unknown.vampire"
+            print "Got the local hostname for ACCRE :/ Mapped %s to %s" % (ipAddress, hostname)
+        else:
+            print "Hostname wasn't found for ip %s. Probably due to testing. Overriding"
+            hostname= "otherhost.cern.ch"
+        
+    allNodes[id] = node
+    scene['nodes'].append( node )
+    print "Got a new node. id: %s ip %s hostname %s" % (id, ipAddress, hostname)
     # fixme for real life
-    if id < 16:
-        addToColumn( id, storageElements, 1 )
-    elif id < 25:
-        addToColumn( id, storageDepots, 0 )
-    elif id < 1000:
-        addToColumn( id, clusterNodes, -1 )
+    if (not hostname.endswith('accre.vanderbilt.edu')) and \
+       (not hostname.endswith('.vampire')):
+        print "  called it a global node"
+        globalBox.addNode( node )
+    elif hostname.startswith('se'):
+        print "  called it a storage element"
+        seIds.append( id )
+        seBox.addNode( node )
+    elif hostname.startswith('cms-depot'):
+        print "  called it a depot"
+        depotBox.addNode( node )
+    elif hostname.startswith('vmp'):
+        print "  called it a cluster node"
+        clusterBox.addNode( node )
+    elif hostname == "monitor.accre.vanderbilt.edu":
+        print "  called it the nagios host"
+        clusterBox.addNode( node )
     else:
-        addToColumn( id, globalNodes, 1.75 )
-            
+        print "Got a strange hostname %s" % hostname
+        clusterBox.addNode( node )
+
+def toggleGridftpBox( val ):
+    global externalSpeedBox5, externalSpeedBox60, toggleGridftpBox
+    if val == 1:
+        externalSpeedBox5.setVisible()
+        externalSpeedBox60.setInvisible()
+        glutTimerFunc(5000, toggleGridftpBox, 0)
+    else:
+        externalSpeedBox60.setVisible()
+        externalSpeedBox5.setInvisible()
+        glutTimerFunc(5000, toggleGridftpBox, 1)
+
+    
+                 
     
 # The main drawing function. 
 currentTime = 0
 def DrawGLScene():
-    global scene, currentTime
-
+    global scene, currentTime, inboundGridftp, outboundGridftp
+    global inSpeed5, outSpeed5, inSpeed60, outSpeed60
+    updateScene()
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)    # Clear The Screen And The Depth Buffer
     glLoadIdentity()                    # Reset The View
     glTranslate(0,0,-2)
     
+    glPushMatrix()
+    glTranslate(-2,1,-1)
+    glColor3f(1.0,1.0,1.0)
+    glLineWidth( 0.5 )
+    WriteText("ACCRE Cluster Status")
+    glPopMatrix()
+    
+    glLineWidth(1)
     glBegin(GL_LINES)
     glColor3f(0.5,0.5,1.0)
     for x in range(-20,21):
@@ -121,7 +219,9 @@ def DrawGLScene():
         glVertex3f(2,x,-1.01)
     glEnd()
     
-
+    for box in scene['nodeBoxes']:
+        box.render()
+    
     for node in scene['nodes']:
         glColor3f( *node['color'] )
         glPushMatrix()
@@ -139,7 +239,7 @@ def DrawGLScene():
         glColor3f( 1.0, 1.0, 1.0 )
         glPushMatrix()
         glTranslatef( *blip['pos'] )
-        size = 0.01
+        size = blip['size']
         glBegin(GL_QUADS)
         glVertex3f(-size,  size, 0.0 )
         glVertex3f( size,  size, 0.0 )
@@ -147,27 +247,61 @@ def DrawGLScene():
         glVertex3f(-size, -size, 0.0 )
         glEnd()
         glPopMatrix()
-        
-        
-        
+    
+    inboundRate = computeAverageTransferRate( 60 * 5, inboundGridftp)
+    inSpeed5.setText( "  %s/sec" % humanizeBytes(inboundRate))
+    outboundRate = computeAverageTransferRate( 60 *  5, outboundGridftp)
+    outSpeed5.setText("  %s/sec" % humanizeBytes(outboundRate))
+    inboundRate = computeAverageTransferRate( 60 * 60, inboundGridftp)
+    inSpeed60.setText( "  %s/sec" % humanizeBytes(inboundRate))
+    outboundRate = computeAverageTransferRate( 60 * 60, outboundGridftp)
+    outSpeed60.setText("  %s/sec" % humanizeBytes(outboundRate))
     #  since this is double buffered, swap the buffers to display what just got drawn. 
     glutSwapBuffers()
+    glutPostRedisplay()
     
+def humanizeBytes( num ):
+    suffix = ['B', 'KB', 'MB', 'GB']
+    suffixBytes = 1
+    retval = 'B'
+    for choice in suffix:
+        suffixBytes *= 1000
+        if suffixBytes > num:
+            suffixBytes /= 1000
+            return "%0.2f %s" % ( num/suffixBytes, choice)
+
+    return "ERROR"
+
+def computeAverageTransferRate( period, transferList ):
+    nBytes = 0
+    currentTime = time.time()
+    for xfer in transferList:
+        if ( xfer[0] - xfer[3] ) > ( currentTime - period ):
+            # transfer was entirely in the window
+            nBytes += xfer[4]
+        elif xfer[0] > ( currentTime - period ):
+            # transfer was partially in the window
+            nBytes += xfer[4] * ( xfer[0] - ( currentTime - period ) ) / xfer[3]
+    return nBytes / period
+
 def doIdle():
     global zsock,scene, currentTime
-    updateDisplay = False   
     try:
         while True: #read everything! Bomb with done.
             trans = zsock.recv_json( zmq.NOBLOCK )
             processTransferInfo( trans )
             updateDisplay = True
     except zmq.ZMQError, e:
+        # slowwwww dowwwwnnn
+        time.sleep(0.01)
         pass
-    
-        
+
+def updateScene():    
+    global currentTime
     thisTick    = glutGet(GLUT_ELAPSED_TIME)
     tick        = float(thisTick - currentTime) / 1000.0
     currentTime = thisTick
+    globalTime  = time.time()
     
     blipList = []
     for blip in scene['blips']:
@@ -188,19 +322,59 @@ def doIdle():
         
     scene['blips'] = blipList
         
-    #if updateDisplay:
-    glutPostRedisplay()
 
 def processTransferInfo( transInfo ):
+    global seIds, inboundGridftp, outboundGridftp
     if transInfo['type'] in ['bfsSend', 'gridftpDone']:
         addNodeIfNeeded( transInfo['from'] )
         addNodeIfNeeded( transInfo['to'] )
-        displayTransferBlip( transInfo['from'], transInfo['to'], transInfo['size'] )
+        duration = 1
+        if 'duration' in transInfo:
+            duration = transInfo['duration']
+        if duration == 0:
+            duration = 1
+            
+        speed = transInfo['size'] / duration
+        displayTransferBlip( transInfo['from'], transInfo['to'], transInfo['size'], speed )
         
-def displayTransferBlip( fromId, toId, size ):
+        print "transfer %s -> %s" % (transInfo['from'], transInfo['to'])
+        if transInfo['type'] == 'gridftpDone':
+            if transInfo['from'] in seIds:
+                # outbound
+                outboundGridftp.append( [time.time(), transInfo['from'], transInfo['to'], transInfo['duration'], transInfo['size']])
+            else:
+                inboundGridftp.append( [time.time(), transInfo['from'], transInfo['to'], transInfo['duration'], transInfo['size']])
+            
+        
+def displayTransferBlip( fromId, toId, size, speed = 0 ):
     global allNodes
+    
+    # make larger transfers bigger
+    if size < 1024*1024:
+        blipSize = 0.01
+    elif size < 1024*1024*1024:
+        blipSize = 0.02
+    else:
+        blipSize = 0.04
+    
+    # make speedier transfers faster    
+    if speed < 1024*1024:
+        blipSpeed = 0.25
+    elif speed > 1024*1024*1024:
+        blipSpeed = 0.75
+    else:
+        blipSpeed =  ( 0.75 - 0.25 ) / ( 1024*1024*1024 - 1024*1024 ) * speed + 0.25
+    
     # don't precache this because we want the blips to follow their target nodes
-    scene['blips'].append( { 'pos' : allNodes[fromId]['pos'][:], 'target' : allNodes[toId], 'speed' : 0.5 } )
+
+    scene['blips'].append( { 'pos' : allNodes[fromId]['pos'][:], 'target' : allNodes[toId],
+                             'speed' : blipSpeed,
+                             'size' : blipSize } )
+
+mapHandle = None
+def loadMap():
+    global mapHandle
+    
 
 # The function called whenever a key is pressed. Note the use of Python tuples to pass in: (key, x, y)  
 def keyPressed(*args):
@@ -222,7 +396,7 @@ def main():
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA | GLUT_DEPTH)
     
     # get a 640 x 480 window 
-    glutInitWindowSize(640, 480)
+    glutInitWindowSize(960, 480)
     
     # the window starts at the upper left corner of the screen 
     glutInitWindowPosition(0, 0)
@@ -230,7 +404,7 @@ def main():
     # Okay, like the C version we retain the window id to use when closing, but for those of you new
     # to Python (like myself), remember this assignment would make the variable local and not global
     # if it weren't for the global declaration at the start of main.
-    window = glutCreateWindow("Jeff Molofee's GL Code Tutorial ... NeHe '99")
+    window = glutCreateWindow("ACCRE Cluster Status Monitor")
 
     # Register the drawing function with glut, BUT in Python land, at least using PyOpenGL, we need to
     # set the function pointer and invoke a function to actually register the callback, otherwise it
@@ -250,8 +424,11 @@ def main():
     # Register the function called when the keyboard is pressed.  
     glutKeyboardFunc(keyPressed)
     
+    glutTimerFunc(5000, toggleGridftpBox, 1)
+    #glEnable(GL_LINE_SMOOTH)
+    
     # Initialize our window. 
-    InitGL(640, 480)
+    InitGL(960, 480)
 
     
 # Print message to console, and kick off the main to get it rolling.
@@ -266,7 +443,7 @@ if __name__ == '__main__':
     
     context = zmq.Context()
     zsock   = context.socket(zmq.SUB)
-    zsock.connect("tcp://0.0.0.0:9898")
+    zsock.connect("tcp://se2.accre.vanderbilt.edu:9898")
     zsock.setsockopt(zmq.SUBSCRIBE, "")
     glutMainLoop()
         
