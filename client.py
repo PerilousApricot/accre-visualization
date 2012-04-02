@@ -100,21 +100,6 @@ def WriteText( text ):
         glutStrokeCharacter(GLUT_STROKE_MONO_ROMAN, ord(char))
     glPopMatrix()
 
-def addToColumn( id, column, xpos ):
-    global scene, allNodes
-    oneDepot = { 'pos' : [xpos, 0.0,-1.0 ], 'color' : (1.0 ,0.2, 0.0), 'size' : 0.03, 'id' : id }
-    column[id] = oneDepot
-    scene['nodes'].append( oneDepot )
-    allNodes[id] = oneDepot
-    # rebalance the boxes
-    # we have two units to work with
-    depotCount = len( column )
-    boxSize = 2.0 / depotCount
-    index = 0.5
-    for k in column:
-        column[k]['size'] = boxSize * 0.2
-        column[k]['pos'][1] = -1 + (index * boxSize)
-        index += 1
 seLookup = {'10.0.1.112' : 'se3.vampire', 
             '10.0.1.113' : 'se4.vampire',
             '10.0.1.114' : 'se5.vampire',
@@ -183,9 +168,6 @@ def toggleGridftpBox( val ):
         externalSpeedBox5.setInvisible()
         glutTimerFunc(5000, toggleGridftpBox, 1)
 
-    
-                 
-    
 # The main drawing function. 
 currentTime = 0
 def DrawGLScene():
@@ -220,7 +202,7 @@ def DrawGLScene():
     glEnd()
     
     for box in scene['nodeBoxes']:
-        box.render()
+        box.renderAll()
     
     for node in scene['nodes']:
         glColor3f( *node['color'] )
@@ -256,6 +238,8 @@ def DrawGLScene():
     inSpeed60.setText( "  %s/sec" % humanizeBytes(inboundRate))
     outboundRate = computeAverageTransferRate( 60 * 60, outboundGridftp)
     outSpeed60.setText("  %s/sec" % humanizeBytes(outboundRate))
+    #externalSpeedBox60.render()
+    #externalSpeedBox5.render()
     #  since this is double buffered, swap the buffers to display what just got drawn. 
     glutSwapBuffers()
     glutPostRedisplay()
